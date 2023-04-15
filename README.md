@@ -6,12 +6,17 @@ without the need for additional proxy tools.
 
 ## Prerequisites
 
-- Go 1.13 or higher
+- Go 1.18 or higher
 - Kubernetes client configuration file (`kubeconfig`)
 
 ## Installation
 
-To use the **gok8sproxy** library, simply import it in your Go project:
+Install **gok8sproxy** in your project with command:
+```bash
+go get github.com/sivukhin/gok8sproxy
+```
+
+Alternatively, you can import it and let your IDE do all the work:
 
 ```go
 import "github.com/sivukhin/gok8sproxy"
@@ -28,11 +33,17 @@ func TestRemoteAccess(t *testing.T) {
     defer cancel()
     
     response, err := http.Get("http://your-service.your-namespace.svc.cluster.local")
-    t.Logf("r: %v, err: %v", response, err)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    body, err := io.ReadAll(response.Body)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    t.Logf("k8s service response: %v", string(body))
 }
 ```
 
 ## How gok8sproxy works
 
-**gok8sproxy** works by intercepting DNS requests (replacing go `net.DefaultResolver`) and forwarding them to the
-appropriate Kubernetes services or external DNS servers.
+**gok8sproxy** works by intercepting DNS requests (replacing go `net.DefaultResolver`) and forwarding them to the appropriate Kubernetes services or external DNS servers.
