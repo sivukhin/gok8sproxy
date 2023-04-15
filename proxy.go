@@ -3,6 +3,7 @@ package gok8sproxy
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"math/rand"
 	"net"
 	"net/http"
@@ -92,11 +93,26 @@ func parseK8sDomain(domain string) (namespace, service string, err error) {
 	return tokens[1], tokens[0], nil
 }
 
-func createForwarderPorts(ports []v12.ServicePort) []string {
+func createForwarderPorts(serviceObject *v12.Service, podObject v12.Pod) []string {
 	tcpPorts := make([]string, 0)
-	for _, port := range ports {
+	for _, port := range serviceObject.Spec.Ports {
 		if port.Protocol == v12.ProtocolTCP {
-			tcpPorts = append(tcpPorts, fmt.Sprintf("%v:%v", port.Port, port.TargetPort.String()))
+			targetPort := int32(-1)
+			if port.TargetPort.Type == intstr.Int {
+				targetPort = port.TargetPort.IntVal
+			} else {
+				for _, container := range podObject.Spec.Containers {
+					for _, containerPort := range container.Ports {
+						if containerPort.Name == port.TargetPort.String() {
+							targetPort = containerPort.ContainerPort
+							break
+						}
+					}
+				}
+			}
+			if targetPort >= 0 {
+				tcpPorts = append(tcpPorts, fmt.Sprintf("%v:%v", port.Port, targetPort))
+			}
 		}
 	}
 	return tcpPorts
@@ -143,8 +159,6 @@ func (f *ForwardPoints) Get(domain string) (net.IP, error) {
 		return nil, fmt.Errorf("%v: unable to get service %v: %w", domain, service, err)
 	}
 	podSelector := labels.SelectorFromSet(serviceObject.Spec.Selector)
-	ports := createForwarderPorts(serviceObject.Spec.Ports)
-	f.logger.Infof("%v: found service %v: ports=%v, selector=%v", domain, serviceObject.Name, ports, podSelector)
 	pods, err := f.client.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{LabelSelector: podSelector.String()})
 	if err != nil {
 		return nil, fmt.Errorf("%v: unable to get service %v pods by selector %v", domain, service, podSelector)
@@ -175,6 +189,9 @@ func (f *ForwardPoints) Get(domain string) (net.IP, error) {
 	f.logger.Infof("%v: chose proxy address: ip=%v", domain, ip)
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", url)
 	shutdown, ready := make(chan struct{}), make(chan struct{})
+
+	ports := createForwarderPorts(serviceObject, targetPod)
+	f.logger.Infof("%v: found service %v: ports=%v, selector=%v", domain, serviceObject.Name, ports, podSelector)
 	fw, err := portforward.NewOnAddresses(
 		dialer,
 		[]string{ip.String()},
