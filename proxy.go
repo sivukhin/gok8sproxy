@@ -9,7 +9,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -93,11 +92,11 @@ func parseK8sDomain(domain string) (namespace, service string, err error) {
 	return tokens[1], tokens[0], nil
 }
 
-func parseK8sPorts(ports []v12.ServicePort) []string {
+func createForwarderPorts(ports []v12.ServicePort) []string {
 	tcpPorts := make([]string, 0)
 	for _, port := range ports {
 		if port.Protocol == v12.ProtocolTCP {
-			tcpPorts = append(tcpPorts, strconv.Itoa(int(port.Port)))
+			tcpPorts = append(tcpPorts, fmt.Sprintf(":%v", port.Port))
 		}
 	}
 	return tcpPorts
@@ -144,7 +143,7 @@ func (f *ForwardPoints) Get(domain string) (net.IP, error) {
 		return nil, fmt.Errorf("%v: unable to get service %v: %w", domain, service, err)
 	}
 	podSelector := labels.SelectorFromSet(serviceObject.Spec.Selector)
-	ports := parseK8sPorts(serviceObject.Spec.Ports)
+	ports := createForwarderPorts(serviceObject.Spec.Ports)
 	f.logger.Infof("%v: found service %v: ports=%v, selector=%v", domain, serviceObject.Name, ports, podSelector)
 	pods, err := f.client.CoreV1().Pods(namespace).List(context.Background(), v1.ListOptions{LabelSelector: podSelector.String()})
 	if err != nil {
