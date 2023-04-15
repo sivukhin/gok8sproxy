@@ -96,7 +96,7 @@ func createForwarderPorts(ports []v12.ServicePort) []string {
 	tcpPorts := make([]string, 0)
 	for _, port := range ports {
 		if port.Protocol == v12.ProtocolTCP {
-			tcpPorts = append(tcpPorts, fmt.Sprintf("%v", port.Port))
+			tcpPorts = append(tcpPorts, fmt.Sprintf("%v:%v", port.Port, port.TargetPort.String()))
 		}
 	}
 	return tcpPorts
