@@ -308,6 +308,8 @@ func (p *DnsProxyPool) Get(dnsAddress string) (DnsProxy, error) {
 	if proxy, ok := p.proxies[dnsAddress]; ok {
 		return proxy, nil
 	}
+	p.logger.Infof("%v: use dns server for the first time", dnsAddress)
+
 	handler := NewDnsHandler(dnsAddress, p.forwardPoints, p.logger)
 	proxyAddress := fmt.Sprintf("127.0.0.1:%v", randomPort())
 	proxyAddrPort, err := netip.ParseAddrPort(proxyAddress)
@@ -315,16 +317,16 @@ func (p *DnsProxyPool) Get(dnsAddress string) (DnsProxy, error) {
 		return DnsProxy{}, err
 	}
 	proxyUdpAddr := net.UDPAddrFromAddrPort(proxyAddrPort)
-	dnsServer := &dns.Server{Addr: proxyAddress, Net: "udp", Handler: handler}
+	ready := make(chan struct{})
+	dnsServer := &dns.Server{Addr: proxyAddress, Net: "udp", Handler: handler, NotifyStartedFunc: func() { ready <- struct{}{} }}
 	go func() {
 		err := dnsServer.ListenAndServe()
 		if err != nil {
 			fmt.Printf("err: %v\n", err)
 		}
 	}()
-	if err != nil {
-		return DnsProxy{}, err
-	}
+	<-ready
+	p.logger.Infof("%v: proxy for dns server is ready at address %v", dnsAddress, proxyAddress)
 	proxy := DnsProxy{address: proxyUdpAddr, server: dnsServer}
 	p.proxies[dnsAddress] = proxy
 	return proxy, nil
@@ -366,6 +368,7 @@ func SetupDnsProxy(logger *zap.SugaredLogger) (cancel func(), err error) {
 			return net.DialUDP(network, nil, proxy.address)
 		},
 	}
+	logger.Info("net.DefaultResolver was replaced by k8s interceptor")
 	return func() {
 		forwardPoints.Shutdown()
 		dnsPool.Shutdown()
