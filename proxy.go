@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/clientcmd/api"
 	"math/rand"
 	"net"
 	"net/http"
@@ -347,15 +348,24 @@ func (p *DnsProxyPool) Shutdown() {
 
 func SetupDnsProxy(logger *zap.SugaredLogger) (cancel func(), err error) {
 	kubeConfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
+	config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfig},
+		&clientcmd.ConfigOverrides{ClusterInfo: api.Cluster{Server: ""}},
+	)
+	rawConfig, err := config.RawConfig()
 	if err != nil {
-		return nil, fmt.Errorf("unable to build k8s config for dns proxy: %w", err)
+		return nil, fmt.Errorf("unable to build k8s raw config for dns proxy: %w", err)
 	}
-	client, err := kubernetes.NewForConfig(config)
+	clientConfig, err := config.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("unable to build k8s client config for dns proxy: %w", err)
+	}
+	client, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create k8s client for dns proxy: %w", err)
 	}
-	forwardPoints := NewForwardPoints(config, client, logger)
+	logger.Infof("successfully created k8s config: current context=%v", rawConfig.CurrentContext)
+	forwardPoints := NewForwardPoints(clientConfig, client, logger)
 	dnsPool := NewDnsProxyPool(forwardPoints, logger)
 	net.DefaultResolver = &net.Resolver{
 		PreferGo:     true,
